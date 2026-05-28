@@ -7668,6 +7668,11 @@ class GatewayRunner:
         if canonical == "goal":
             return await self._handle_goal_command(event)
 
+        if canonical == "view":
+            event.text = self._build_gateway_view_prompt(event, source, _quick_key)
+            command = None
+            canonical = None
+
         if canonical == "subgoal":
             return await self._handle_subgoal_command(event)
 
@@ -10790,6 +10795,26 @@ class GatewayRunner:
             return None, None
         max_turns = self._goal_max_turns_from_config()
         return GoalManager(session_id=sid, default_max_turns=max_turns), session_entry
+
+    def _build_gateway_view_prompt(self, event: "MessageEvent", source, session_key: str) -> str:
+        """Build the send-style prompt used by /view on gateway platforms."""
+        from hermes_cli.project_view import ProjectViewContext, build_project_view_prompt
+
+        try:
+            session_entry = self.session_store.get_or_create_session(source)
+        except Exception:
+            session_entry = None
+        platform = getattr(source, "platform", None)
+        platform_name = getattr(platform, "value", None) or str(platform or "gateway")
+        return build_project_view_prompt(
+            event.get_command_args().strip(),
+            context=ProjectViewContext(
+                cwd=os.environ.get("TERMINAL_CWD", os.getcwd()),
+                session_id=getattr(session_entry, "session_id", None) or session_key,
+                title=getattr(session_entry, "title", None) or "",
+                source=platform_name,
+            ),
+        )
 
     async def _handle_goal_command(self, event: "MessageEvent") -> str:
         """Handle /goal for gateway platforms.

@@ -8635,6 +8635,8 @@ class HermesCLI:
                 _cprint(f"  No agent running; queued as next turn: {payload[:80]}{'...' if len(payload) > 80 else ''}")
         elif canonical == "goal":
             self._handle_goal_command(cmd_original)
+        elif canonical == "view":
+            self._handle_view_command(cmd_original)
         elif canonical == "subgoal":
             self._handle_subgoal_command(cmd_original)
         elif canonical == "skin":
@@ -9186,6 +9188,34 @@ class HermesCLI:
             print("   disconnect   Revert to default browser backend")
             print("   status       Show current browser mode")
             print()
+
+    # ────────────────────────────────────────────────────────────────
+    # /view — checked-off project view prompt
+    # ────────────────────────────────────────────────────────────────
+    def _handle_view_command(self, cmd: str) -> None:
+        """Queue a Project View prompt through the normal agent path."""
+        parts = (cmd or "").strip().split(None, 1)
+        topic = parts[1].strip() if len(parts) > 1 else ""
+        try:
+            from hermes_cli.project_view import ProjectViewContext, build_project_view_prompt
+        except Exception as exc:
+            _cprint(f"  Project view unavailable: {exc}")
+            return
+
+        prompt = build_project_view_prompt(
+            topic,
+            context=ProjectViewContext(
+                cwd=os.getenv("TERMINAL_CWD", os.getcwd()),
+                session_id=getattr(self, "session_id", "") or "",
+                title=getattr(self, "_pending_title", "") or "",
+                source="cli",
+            ),
+        )
+        self._pending_input.put(prompt)
+        if getattr(self, "_agent_running", False):
+            _cprint("  Project view queued for the next turn.")
+        else:
+            _cprint("  Project view queued.")
 
     # ────────────────────────────────────────────────────────────────
     # /goal — persistent cross-turn goals (Ralph-style loop)
