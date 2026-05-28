@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -2348,6 +2349,9 @@ def test_commands_catalog_filters_gateway_only_commands_and_keeps_status_visible
 
     assert "/status" in pairs
     assert canon["/status"] == "/status"
+    assert "/loop" in pairs
+    assert "Fruit-Loop" in pairs["/loop"]
+    assert canon["/loop"] == "/loop"
 
     assert "/topic" not in pairs
     assert "/approve" not in pairs
@@ -2361,6 +2365,84 @@ def test_commands_catalog_filters_gateway_only_commands_and_keeps_status_visible
     assert "/approve" not in canon
     assert "/deny" not in canon
     assert "/set-home" not in canon
+
+
+def test_loop_command_dispatch_start_and_status_use_local_controller_state(monkeypatch, tmp_path):
+    monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+    server._sessions["sid"] = _session()
+    try:
+        start = server.handle_request(
+            {
+                "id": "1",
+                "method": "command.dispatch",
+                "params": {"name": "loop", "arg": "start alpha docs.md", "session_id": "sid"},
+            }
+        )
+        assert start["result"]["type"] == "exec"
+        assert "Loop: alpha" in start["result"]["output"]
+        assert "Status: started" in start["result"]["output"]
+        assert (tmp_path / ".hermes" / "loops" / "alpha" / "loop.json").exists()
+
+        status = server.handle_request(
+            {
+                "id": "2",
+                "method": "command.dispatch",
+                "params": {"name": "loop", "arg": "status alpha", "session_id": "sid"},
+            }
+        )
+        assert status["result"]["type"] == "exec"
+        assert "Loop: alpha" in status["result"]["output"]
+        assert "Phase: planning" in status["result"]["output"]
+    finally:
+        server._sessions.pop("sid", None)
+
+
+def test_loop_command_dispatch_run_next_returns_send_payload(monkeypatch, tmp_path):
+    monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
+    server._sessions["sid"] = _session()
+    try:
+        server.handle_request(
+            {
+                "id": "1",
+                "method": "command.dispatch",
+                "params": {"name": "loop", "arg": "start alpha docs.md", "session_id": "sid"},
+            }
+        )
+        root = tmp_path / ".hermes" / "loops" / "alpha"
+        (root / "stories.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "id": "S1",
+                        "title": "Runner",
+                        "status": "todo",
+                        "objective": "Run the next story.",
+                        "acceptance": ["Prompt is submitted"],
+                    }
+                ]
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "init"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        run = server.handle_request(
+            {
+                "id": "2",
+                "method": "command.dispatch",
+                "params": {"name": "loop", "arg": "run next alpha", "session_id": "sid"},
+            }
+        )
+        assert run["result"]["type"] == "send"
+        assert "Run: S1 — Runner" in run["result"]["message"]
+        state = json.loads((root / "loop.json").read_text(encoding="utf-8"))
+        assert state["status"] == "executing"
+    finally:
+        server._sessions.pop("sid", None)
 
 
 def test_session_status_reads_live_gateway_agent(monkeypatch):

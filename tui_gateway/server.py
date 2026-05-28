@@ -4762,6 +4762,7 @@ _PENDING_INPUT_COMMANDS: frozenset[str] = frozenset(
         "steer",
         "plan",
         "goal",
+        "loop",
     }
 )
 
@@ -5075,6 +5076,26 @@ def _(rid, params: dict) -> dict:
                 pass
         # Fallback: no active run, treat as next-turn message
         return _ok(rid, {"type": "send", "message": arg})
+
+    if name == "loop":
+        if not session:
+            return _err(rid, 4001, "no active session")
+        try:
+            from hermes_cli.loops import dispatch_payload
+        except Exception as exc:
+            return _err(rid, 5031, f"loops unavailable: {exc}")
+        sid_key = session.get("session_key") or ""
+        title = session.get("title") or ""
+        cwd = os.getenv("TERMINAL_CWD", os.getcwd())
+        try:
+            return _ok(
+                rid,
+                dispatch_payload(arg, cwd=cwd, session_id=sid_key, title=title),
+            )
+        except ValueError as exc:
+            return _err(rid, 4004, f"invalid loop command: {exc}")
+        except Exception as exc:
+            return _err(rid, 5032, f"loop command failed: {exc}")
 
     if name == "goal":
         if not session:
