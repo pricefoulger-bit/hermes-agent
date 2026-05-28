@@ -7621,6 +7621,15 @@ class GatewayRunner:
         if canonical == "goal":
             return await self._handle_goal_command(event)
 
+        if canonical == "loop":
+            loop_result = await self._handle_loop_command(event, source, _quick_key)
+            if isinstance(loop_result, dict) and loop_result.get("type") == "send":
+                event.text = loop_result.get("message") or ""
+                command = None
+                canonical = None
+            else:
+                return str(loop_result) if loop_result is not None else None
+
         if canonical == "subgoal":
             return await self._handle_subgoal_command(event)
 
@@ -10742,6 +10751,34 @@ class GatewayRunner:
             return None, None
         max_turns = self._goal_max_turns_from_config()
         return GoalManager(session_id=sid, default_max_turns=max_turns), session_entry
+
+    async def _handle_loop_command(self, event: "MessageEvent", source, session_key: str):
+        """Handle /loop for gateway platforms via the shared loop controller.
+
+        Exec-style lifecycle commands return user-facing text immediately.
+        Prompt-producing commands return a small sentinel dict so the caller can
+        rewrite the current event and run it through the normal agent path.
+        """
+        try:
+            from hermes_cli.loops import dispatch_payload
+        except Exception as exc:
+            return f"Loops unavailable: {exc}"
+        try:
+            session_entry = self.session_store.get_or_create_session(source)
+            payload = dispatch_payload(
+                event.get_command_args().strip(),
+                cwd=os.environ.get("TERMINAL_CWD", os.getcwd()),
+                session_id=getattr(session_entry, "session_id", None) or session_key,
+                title=getattr(session_entry, "title", None) or "",
+            )
+        except Exception as exc:
+            return f"Loop command failed: {exc}"
+        if payload.get("type") == "exec":
+            return payload.get("output") or ""
+        message = payload.get("message") or ""
+        if not message:
+            return "Loop command produced no prompt."
+        return {"type": "send", "message": message}
 
     async def _handle_goal_command(self, event: "MessageEvent") -> str:
         """Handle /goal for gateway platforms.

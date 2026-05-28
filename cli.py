@@ -8635,6 +8635,8 @@ class HermesCLI:
                 _cprint(f"  No agent running; queued as next turn: {payload[:80]}{'...' if len(payload) > 80 else ''}")
         elif canonical == "goal":
             self._handle_goal_command(cmd_original)
+        elif canonical == "loop":
+            self._handle_loop_command(cmd_original)
         elif canonical == "subgoal":
             self._handle_subgoal_command(cmd_original)
         elif canonical == "skin":
@@ -9186,6 +9188,51 @@ class HermesCLI:
             print("   disconnect   Revert to default browser backend")
             print("   status       Show current browser mode")
             print()
+
+    # ────────────────────────────────────────────────────────────────
+    # /loop — global Fruit-Loop project controller
+    # ────────────────────────────────────────────────────────────────
+    def _handle_loop_command(self, cmd: str) -> None:
+        """Dispatch /loop through the shared Hermes Agent loop controller.
+
+        Local lifecycle commands render immediately. Prompt-producing commands
+        are queued through the normal CLI input path so they run in the current
+        agent session instead of being tied to any separate TUI surface.
+        """
+        parts = (cmd or "").strip().split(None, 1)
+        arg = parts[1].strip() if len(parts) > 1 else ""
+        try:
+            from hermes_cli.loops import dispatch_payload
+        except Exception as exc:
+            _cprint(f"  Loops unavailable: {exc}")
+            return
+
+        try:
+            payload = dispatch_payload(
+                arg,
+                cwd=os.getenv("TERMINAL_CWD", os.getcwd()),
+                session_id=getattr(self, "session_id", "unknown") or "unknown",
+                title=getattr(self, "_pending_title", "") or "",
+            )
+        except Exception as exc:
+            _cprint(f"  Loop command failed: {exc}")
+            return
+
+        if payload.get("type") == "exec":
+            output = payload.get("output") or ""
+            if output:
+                _cprint(output)
+            return
+
+        message = payload.get("message") or ""
+        if not message:
+            _cprint("  Loop command produced no prompt.")
+            return
+        self._pending_input.put(message)
+        if getattr(self, "_agent_running", False):
+            _cprint(f"  Loop prompt queued for the next turn: {message[:80]}{'...' if len(message) > 80 else ''}")
+        else:
+            _cprint(f"  Loop prompt queued: {message[:80]}{'...' if len(message) > 80 else ''}")
 
     # ────────────────────────────────────────────────────────────────
     # /goal — persistent cross-turn goals (Ralph-style loop)
